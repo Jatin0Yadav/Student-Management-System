@@ -5,13 +5,12 @@
     <appender name="LOGSTASH"
               class="net.logstash.logback.appender.LogstashTcpSocketAppender">
 
-        <destination>localhost:5001</destination>
+        <destination>logstash:5001</destination>
 
         <encoder
                 class="net.logstash.logback.encoder.LogstashEncoder"/>
 
     </appender>
-
 
     <root level="INFO">
         <appender-ref ref="LOGSTASH"/>
