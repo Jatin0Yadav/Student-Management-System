@@ -1,0 +1,418 @@
+services:
+
+  # =========================================================
+  # POSTGRESQL
+  # =========================================================
+
+  postgres-db:
+    image: postgres:17
+    container_name: postgres-db
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # EUREKA SERVER
+  # =========================================================
+
+  eureka-server:
+    build:
+      context: ./eureka-server
+
+    image: eureka-server
+    container_name: eureka-server
+
+    ports:
+      - "8761:8761"
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # CONFIG SERVER
+  # =========================================================
+
+  config-server:
+    build:
+      context: ./config-server
+
+    image: config-server
+    container_name: config-server
+
+    ports:
+      - "8888:8888"
+
+    depends_on:
+      - eureka-server
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # STUDENT SERVICE
+  # =========================================================
+
+  student-service:
+    build:
+      context: ./student-service
+
+    image: student-service
+    container_name: student-service
+
+    ports:
+      - "8080:8080"
+
+    depends_on:
+      - postgres-db
+      - eureka-server
+      - config-server
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # DEPARTMENT SERVICE
+  # =========================================================
+
+  department-service:
+    build:
+      context: ./department-service
+
+    image: department-service
+    container_name: department-service
+
+    ports:
+      - "8081:8081"
+
+    depends_on:
+      - postgres-db
+      - eureka-server
+      - config-server
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # NOTIFICATION SERVICE
+  # =========================================================
+
+  notification-service:
+    build:
+      context: ./notification-service
+
+    image: notification-service
+    container_name: notification-service
+
+    ports:
+      - "8082:8082"
+
+    depends_on:
+      - kafka
+      - eureka-server
+      - config-server
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # AUDIT SERVICE
+  # =========================================================
+
+  audit-service:
+    build:
+      context: ./audit-service
+
+    image: audit-service
+    container_name: audit-service
+
+    ports:
+      - "8083:8083"
+
+    depends_on:
+      - postgres-db
+      - kafka
+      - eureka-server
+      - config-server
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # API GATEWAY
+  # =========================================================
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+
+    image: api-gateway
+    container_name: api-gateway
+
+    ports:
+      - "8084:8084"
+
+    depends_on:
+      - eureka-server
+      - config-server
+      - student-service
+      - department-service
+      - notification-service
+      - audit-service
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # KAFKA
+  # =========================================================
+
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka
+
+    ports:
+      - "9092:9092"
+
+    environment:
+      KAFKA_NODE_ID: 1
+
+      KAFKA_PROCESS_ROLES: broker,controller
+
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # ZIPKIN
+  # =========================================================
+
+  zipkin:
+    image: openzipkin/zipkin
+    container_name: zipkin
+
+    ports:
+      - "9411:9411"
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # ELASTICSEARCH
+  # =========================================================
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: elasticsearch
+
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+
+    ports:
+      - "9200:9200"
+
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # LOGSTASH
+  # =========================================================
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.15.0
+    container_name: logstash
+
+    ports:
+      - "5000:5000"
+
+    volumes:
+      - ./elk/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+
+    depends_on:
+      - elasticsearch
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # KIBANA
+  # =========================================================
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    container_name: kibana
+
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+
+    ports:
+      - "5601:5601"
+
+    depends_on:
+      - elasticsearch
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # PROMETHEUS
+  # =========================================================
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+
+    ports:
+      - "9090:9090"
+
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+
+    depends_on:
+      - alertmanager
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # ALERTMANAGER
+  # =========================================================
+
+  alertmanager:
+    image: prom/alertmanager
+    container_name: alertmanager
+
+    ports:
+      - "9093:9093"
+
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager:ro
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # GRAFANA
+  # =========================================================
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+
+    ports:
+      - "3001:3000"
+
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+    depends_on:
+      - prometheus
+
+    networks:
+      - microservices-network
+
+    restart: unless-stopped
+
+
+# ===========================================================
+# NETWORK
+# ===========================================================
+
+networks:
+
+  microservices-network:
+    driver: bridge
+
+
+# ===========================================================
+# VOLUMES
+# ===========================================================
+
+volumes:
+
+  postgres_data:
+
+  kafka_data:
+
+  elasticsearch_data:
+
+  grafana_data:
